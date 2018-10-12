@@ -1,5 +1,6 @@
 
 // todo: 1. Kontrolovat ID odpovědí, zpracovávat pouze první odpověď na daný dotaz.
+// todo 2. Přepínač -r a -t současně
 
 /* Requirements */
 #include <iostream> // IO operations
@@ -8,6 +9,7 @@
 #include <netinet/if_ether.h> // struct ether_header
 #include <netinet/ip.h> // struct ip
 #include <netinet/udp.h> // struct udphdr
+#include <arpa/inet.h> // htons
 
 /* Error codes: */
 #define EXIT_ARG 1 // error when parsing arguments
@@ -17,33 +19,54 @@
 using namespace std;
 
 typedef struct dns_header {
-	unsigned char id[2];
+	uint16_t id;
 	unsigned char flags[2];
-	unsigned char questions[2];
-	unsigned char annswers[2];
-	unsigned char authority[2];
-	unsigned char additional[2];
+	uint16_t questions;
+	uint16_t answers;
+	uint16_t authority;
+	uint16_t additional;
 } dns_header;
 
-string dnsResponseType[] = {
-		"",
-		"A",
-		"NS",
-		"MD",
-		"MF",
-		"CNAME",
-		"SOA",
-		"MB",
-		"MG",
-		"MR",
-		"NULL",
-		"WKS",
-		"PTR",
-		"HINFO",
-		"MINFO",
-		"MX",
-		"TXT"
-};
+string dnsTypeName(int code) {
+	switch (code) {
+		case 1:
+			return "A";
+		case 2:
+			return "NS";
+		case 3:
+			return "MD";
+		case 4:
+			return "MF";
+		case 5:
+			return "CNAME";
+		case 6:
+			return "SOA";
+		case 7:
+			return "MB";
+		case 8:
+			return "MG";
+		case 9:
+			return "MR";
+		case 10:
+			return "NULL";
+		case 11:
+			return "WKS";
+		case 12:
+			return "PTR";
+		case 13:
+			return "HINFO";
+		case 14:
+			return "MINFO";
+		case 15:
+			return "MX";
+		case 16:
+			return "TXT";
+		case 28:
+			return "AAAA";
+		default:
+			return "UNKNOWN";
+	}
+}
 
 void printHelp() {
 	exit(EXIT_ARG);
@@ -110,22 +133,23 @@ void setDnsFilter(pcap_t *pcap) {
 	}
 }
 
-string dnsDomainFromPointer(const unsigned char *data, unsigned int octet, unsigned int dnsBase) {
-	string name = "";
-
+void dnsDomainFromPointer(const unsigned char *data, unsigned int octet, unsigned int dnsBase, string* name) {
 	unsigned int offset = (data[octet++] - 192) << 8;
 	offset += data[octet] + dnsBase;
-	while (data[offset] != '\0') {
-		if (!name.empty() && name.back() != '.') {
-			name += ".";
+	octet = offset;
+
+	while (data[octet] != '\0' && data[octet] <= 63) {
+		if (!name->empty() && name->back() != '.') {
+			*name += ".";
 		}
-		unsigned int length = data[offset++];
+		unsigned int length = data[octet++];
 		for (unsigned int i = 0; i < length; i++) {
-			name += data[offset++];
+			*name += data[octet++];
 		}
 	}
-
-	return name;
+	if (data[octet] != '\0') {
+		dnsDomainFromPointer(data, octet, dnsBase, name);
+	}
 }
 
 unsigned int parseQuestion(const unsigned char *data, unsigned int octet) {
@@ -156,26 +180,15 @@ unsigned int parseAnswers(const unsigned char *data, unsigned int octet, unsigne
 		}
 	}
 	if (data[octet] != '\0') {
-		unsigned int offset = (data[octet++] - 192) << 8;
-		offset += data[octet] + dnsBase;
-		while (data[offset] != '\0') {
-			if (!rName.empty() && rName.back() != '.') {
-				rName += ".";
-			}
-			unsigned int length = data[offset++];
-			for (unsigned int i = 0; i < length; i++) {
-				rName += data[offset++];
-			}
-		}
+		dnsDomainFromPointer(data, octet, dnsBase, &rName);
+		octet ++;
 	}
 	octet++;
-
-	cout << endl;
 
 	// TYPE
 	unsigned int typeCode = data[octet++] << 8;
 	typeCode += data[octet++];
-	string rType = dnsResponseType[typeCode];
+	string rType = dnsTypeName(typeCode);
 
 	// Skip CLASS
 	octet += 2;
@@ -211,17 +224,8 @@ unsigned int parseAnswers(const unsigned char *data, unsigned int octet, unsigne
 				}
 			}
 			if (data[octet] != '\0') {
-				unsigned int offset = (data[octet++] - 192) << 8;
-				offset += data[octet] + dnsBase;
-				while (data[offset] != '\0') {
-					if (!rData.empty() && rData.back() != '.') {
-						rData += ".";
-					}
-					unsigned int length = data[offset++];
-					for (unsigned int i = 0; i < length; i++) {
-						rData += data[offset++];
-					}
-				}
+				dnsDomainFromPointer(data, octet, dnsBase, &rData);
+				octet++;
 			}
 			octet++;
 			break;
@@ -231,9 +235,7 @@ unsigned int parseAnswers(const unsigned char *data, unsigned int octet, unsigne
 			exit(42);
 	}
 
-	cout << "NAME:" << rName << endl;
-	cout << "TYPE:" << rType << endl;
-	cout << "DATA:" << rData << endl;
+	cout << rName << " " << rType << " " << rData << " " << endl;
 
 	return octet;
 }
@@ -260,28 +262,17 @@ bool parsePacket(const unsigned char *data) {
 	unsigned int octet = sizeOfHeaders + sizeof(struct dns_header);
 
 	// Handle question sections (skip them)
-	unsigned int questions = (dns->questions[0] << 8) + dns->questions[1];
-	printf("Queries:%u\n", questions);
+	unsigned int questions =  htons(dns->questions);
 	for (unsigned int i = 0; i < questions; i++) {
 		octet = parseQuestion(data, octet);
 	}
 
-	unsigned int annswers = (dns->annswers[0] << 8) + dns->annswers[1];
-	printf("Annswers:%u\n", annswers);
-	for (unsigned int i = 0; i < annswers; i++) {
+	unsigned int answers = htons(dns->answers);
+	for (unsigned int i = 0; i < answers; i++) {
 		octet = parseAnswers(data, octet, sizeOfHeaders);
 	}
 
-/*
-	for (; octet < header->len; octet++) {
-		// Start printing on the next after every 16 octets
-		if ((octet % 16) == 0) printf("\n");
-		// Print each octet as hex (x), make sure there is always two characters (.2).
-		printf("%.2x ", data[octet]);
-	}
-*/
-
-	cout << endl << "=============" << endl;
+	cout << "===" << endl;
 
 	return true;
 }
