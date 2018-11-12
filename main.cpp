@@ -1,33 +1,14 @@
-
 // todo: 1. Kontrolovat ID odpovědí, zpracovávat pouze první odpověď na daný dotaz.
 // todo 2. Přepínač -r a -t současně
 
-/* Requirements */
-#include <iostream> // IO operations
-#include <unistd.h> // getopt
-#include <pcap/pcap.h> // pcap
-#include <netinet/if_ether.h> // struct ether_header
-#include <netinet/ip.h> // struct ip
-#include <netinet/udp.h> // struct udphdr
-#include <arpa/inet.h> // htons
+#include "main.h"
 
-/* Error codes: */
-#define EXIT_ARG 1 // error when parsing arguments
-#define EXIT_IOE 2 // I/O error
-#define EXIT_INT 3 // internal error
+// Global variable
+Stats stats;
 
 using namespace std;
 
-typedef struct dns_header {
-	uint16_t id;
-	unsigned char flags[2];
-	uint16_t questions;
-	uint16_t answers;
-	uint16_t authority;
-	uint16_t additional;
-} dns_header;
-
-string dnsTypeName(int code) {
+string dnsTypeName(unsigned int code) {
 	switch (code) {
 		case 1:
 			return "A";
@@ -72,7 +53,7 @@ void printHelp() {
 	exit(EXIT_ARG);
 }
 
-void parseArguments(int argc, char *argv[], string *file, string *interface, string *server, long *duration) {
+void parseArguments(int argc, char **argv, string *file, string *interface, string *server, long *duration) {
 	int opt;
 	while ((opt = getopt(argc, argv, "r:i:s:t:")) != -1) {
 		switch (opt) {
@@ -133,23 +114,53 @@ void setDnsFilter(pcap_t *pcap) {
 	}
 }
 
-void dnsDomainFromPointer(const unsigned char *data, unsigned int octet, unsigned int dnsBase, string* name) {
+unsigned int dnsDomain(const unsigned char *data, unsigned int octet, unsigned int dnsBase, string *name) {
+	while (data[octet] != '\0' && data[octet] <= 63) {
+		unsigned int length = data[octet++];
+		for (unsigned int i = 0; i < length; i++) {
+			*name += data[octet++];
+		}
+		*name += '.';
+	}
+	if (data[octet] != '\0') {
+		dnsDomainFromPointer(data, octet, dnsBase, name);
+		octet ++;
+	}
+	octet += 1;
+	return octet;
+}
+
+void dnsDomainFromPointer(const unsigned char *data, unsigned int octet, unsigned int dnsBase, string *name) {
 	unsigned int offset = (data[octet++] - 192) << 8;
 	offset += data[octet] + dnsBase;
 	octet = offset;
 
 	while (data[octet] != '\0' && data[octet] <= 63) {
-		if (!name->empty() && name->back() != '.') {
-			*name += ".";
-		}
 		unsigned int length = data[octet++];
 		for (unsigned int i = 0; i < length; i++) {
 			*name += data[octet++];
 		}
+		*name += '.';
 	}
 	if (data[octet] != '\0') {
 		dnsDomainFromPointer(data, octet, dnsBase, name);
 	}
+}
+
+unsigned int parseInt4(unsigned int *octet, const unsigned char *data) {
+	unsigned int number;
+	number = data[(*octet)++] << 24;
+	number += data[(*octet)++] << 16;
+	number += data[(*octet)++] << 8;
+	number += data[(*octet)++];
+	return number;
+}
+
+unsigned int parseInt2(unsigned int *octet, const unsigned char *data) {
+	unsigned int number;
+	number = data[(*octet)++] << 8;
+	number += data[(*octet)++];
+	return number;
 }
 
 unsigned int parseQuestion(const unsigned char *data, unsigned int octet) {
@@ -167,27 +178,106 @@ unsigned int parseQuestion(const unsigned char *data, unsigned int octet) {
 	return octet;
 }
 
-unsigned int parseAnswers(const unsigned char *data, unsigned int octet, unsigned int dnsBase) {
+string getCanonicalIp(uint16_t *origin) {
+
+	//struct in6_addr ipv6nr;
+	//inet_pton(AF_INET6, origin, &ipv6nr);
+
+	string canonical;
+
+	// Check zero parts
+	unsigned int fromMax = 0;
+	unsigned int lengthMax = 0;
+	unsigned int from = 0;
+	unsigned int length = 0;
+	for (unsigned int i = 0; i < 8; ++i) {
+		if (origin[i] == 0) {
+			if (length == 0) {
+				from = i;
+			}
+			length++;
+		}
+		else {
+			if (length != 0) {
+				if (lengthMax < length){
+					fromMax = from;
+					lengthMax = length;
+				}
+				from = 0;
+				length = 0;
+			}
+		}
+	}
+	char numberStr[4];
+	for (unsigned int i = 0; i < 8; i++) {
+		if (i > 0) {
+			canonical += ':';
+		}
+		if (i == fromMax && lengthMax > 1) {
+			i = fromMax + lengthMax - 1;
+			if (i >= 8) canonical += ':';
+			continue;
+		}
+		sprintf(&numberStr[0], "%x", origin[i]);
+		canonical += numberStr;
+	}
+
+	return canonical;
+}
+
+string getBase64(const unsigned char *data, unsigned int length, unsigned int *octet) {
+	unsigned int base64in = 0;
+	unsigned int i = 0;
+	uint8_t base64index;
+	string base64out;
+	for (; i < length; i++) {
+		base64in = base64in << 8;
+		base64in += data[*octet];
+
+		if ((i % 3) == 2) { // 3rd number (24 bit number)
+			base64index = (uint8_t) (base64in >> 18); // XXXX XX00 0000 0000 0000 0000
+			base64out += base64table[base64index];
+			base64index = (uint8_t) ((base64in >> 12) & 0x3F); // 0000 00XX XXXX 0000 0000 0000
+			base64out += base64table[base64index];
+			base64index = (uint8_t) ((base64in >> 6) & 0x3F); // 0000 0000 0000 XXXX XX00 0000
+			base64out += base64table[base64index];
+			base64index = (uint8_t) (base64in & 0x3F); // 0000 0000 0000 0000 00XX XXXX
+			base64out += base64table[base64index];
+
+			base64in = 0;
+		}
+
+		(*octet)++;
+	}
+
+	if ((i % 3) == 1) { // 8 of 24 bits
+		base64index = (uint8_t) (base64in >> 2); // ---- ---- ---- ---- XXXX XX00
+		base64out += base64table[base64index];
+		base64index = (uint8_t) ((base64in << 4) & 0x3f); // ---- ---- ---- ---- 0000 00XX
+		base64out += base64table[base64index];
+		base64out += '=';
+		base64out += '=';
+	}
+	else if ((i % 3) == 2) { // 16 of 24 bits
+		base64index = (uint8_t) (base64in >> 10); // ---- ---- XXXX XX00 0000 0000
+		base64out += base64table[base64index];
+		base64index = (uint8_t) ((base64in >> 4) & 0x3F); // ---- ---- 0000 00XX XXXX 0000
+		base64out += base64table[base64index];
+		base64index = (uint8_t) ((base64in << 2) & 0x3F); // ---- ---- 0000 0000 0000 XXXX
+		base64out += base64table[base64index];
+		base64out += '=';
+	}
+
+	return base64out;
+}
+
+unsigned int parseAnswers(const unsigned char *data, unsigned int octet, unsigned int dnsBase, Stats* stats) {
 	// NAME
-	string rName = "";
-	while (data[octet] != '\0' && data[octet] <= 63) {
-		if (!rName.empty()) {
-			rName += ".";
-		}
-		unsigned int length = data[octet++];
-		for (unsigned int i = 0; i < length; i++) {
-			rName += data[octet++];
-		}
-	}
-	if (data[octet] != '\0') {
-		dnsDomainFromPointer(data, octet, dnsBase, &rName);
-		octet ++;
-	}
-	octet++;
+	string rName;
+ 	octet = dnsDomain(data, octet, dnsBase, &rName);
 
 	// TYPE
-	unsigned int typeCode = data[octet++] << 8;
-	typeCode += data[octet++];
+	unsigned int typeCode = parseInt2(&octet, data);
 	string rType = dnsTypeName(typeCode);
 
 	// Skip CLASS
@@ -201,46 +291,100 @@ unsigned int parseAnswers(const unsigned char *data, unsigned int octet, unsigne
 	rdlenght += data[octet++];
 
 	// RDATA
-	string rData = "";
+	string rData;
 	switch (typeCode) {
 
 		case 1: // A
 			for (unsigned int i = 0; i < rdlenght; i++) {
 				if (!rData.empty()) {
-					rData += ".";
+					rData += '.';
 				}
-			 	rData += to_string(data[octet++]);
+				rData += to_string(data[octet++]);
 			}
+			break;
+
+		case 15: // MX
+			{ // Preference
+			unsigned int preference = data[octet++] << 8;
+			preference += data[octet++];
+			rData += '"' + to_string(preference) + ' ';
+			octet = dnsDomain(data, octet, dnsBase, &rData);
+			rData += '"';
+			}break;
+
+		case 2: // NS
+			octet = dnsDomain(data, octet, dnsBase, &rData);
 			break;
 
 		case 5: // CNAME
-			while (data[octet] != '\0' && data[octet] <= 63) {
-				if (!rData.empty()) {
-					rData += ".";
-				}
-				unsigned int length = data[octet++];
-				for (unsigned int i = 0; i < length; i++) {
-					rData += data[octet++];
-				}
-			}
-			if (data[octet] != '\0') {
-				dnsDomainFromPointer(data, octet, dnsBase, &rData);
-				octet++;
-			}
-			octet++;
+			octet = dnsDomain(data, octet, dnsBase, &rData);
 			break;
 
+		case 6: // SOA
+			{rData += '"';
+			// Primary name server
+			octet = dnsDomain(data, octet, dnsBase, &rData);
+			rData += ' ';
+			// Responsible authority's mailbox
+			octet = dnsDomain(data, octet, dnsBase, &rData);
+			// Serial number, Refresh interval, Retry interval, Expire limit, Minimum TTL
+			for (unsigned int i = 0; i < 5; i++) {
+				rData += ' ' + to_string(parseInt4(&octet, data));
+			}
+			rData += '"';
+			}break;
+
+		case 16: // TXT
+			rData += '"';
+			octet++;
+			for (unsigned int i = 0; i < rdlenght-1; i++) {
+				rData += data[octet++];
+			}
+			rData += '"';
+			break;
+
+		case 28: // AAAA
+			uint16_t parts[8];
+			for (uint16_t &part : parts) {
+				// Convert to int (ommitting leading zeros)
+				part = data[octet++] << 8;
+				part += data[octet++];
+			}
+			rData += getCanonicalIp(parts);
+			break;
+
+		case 48: // DNSKEY
+			{unsigned int number = 0;
+			// Flags
+			rData += '"' + to_string(parseInt2(&octet, data)) + ' ';
+			// Protocol
+			number = data[octet++];
+			rData += to_string(number) + ' ';
+			// Algorithm
+			number = data[octet++];
+			rData += to_string(number) + ' ';
+			// Public Key
+			rData += getBase64(data, rdlenght - 4, &octet) + '"';
+			cout << rData << endl;
+			}break;
+
+
+
 		default:
-			cout << "!!! EMERGENCY !!! NOT IMPLEMENTED: " << typeCode << endl;
-			exit(42);
+			cout << "!!! EMERGENCY !!! NOT IMPLEMENTED: " << typeCode << endl; // todo REMOVE BEFORE RELEASE!
+			exit(3);
 	}
 
-	cout << rName << " " << rType << " " << rData << " " << endl;
+	dns_response response;
+	response.domainName = rName;
+	response.rrType = rType;
+	response.rrAnswer = rData;
+	stats->add(response);
 
 	return octet;
 }
 
-bool parsePacket(const unsigned char *data) {
+bool parsePacket(const unsigned char *data, Stats *stats) {
 	// Switch between length of IPv4 or IPv6 header
 	unsigned int sizeOfHeaders = sizeof(struct ether_header) + sizeof(struct udphdr);
 	uint8_t version = (uint8_t) (data[sizeof(struct ether_header)] >> 4);
@@ -269,15 +413,22 @@ bool parsePacket(const unsigned char *data) {
 
 	unsigned int answers = htons(dns->answers);
 	for (unsigned int i = 0; i < answers; i++) {
-		octet = parseAnswers(data, octet, sizeOfHeaders);
+		octet = parseAnswers(data, octet, sizeOfHeaders, stats);
 	}
-
-	cout << "===" << endl;
 
 	return true;
 }
 
+void quit(int signum) {
+	if (signum == SIGUSR1) {
+		cout << stats.print();
+	}
+	exit(EXIT_SUCCESS);
+}
+
 int main(int argc, char *argv[]) {
+
+	signal(SIGUSR1, quit);
 
 	string file;
 	string interface;
@@ -307,7 +458,7 @@ int main(int argc, char *argv[]) {
 	unsigned int packetNr = 0;
 
 	while ((err = pcap_next_ex(pcap, &header, &data)) == 1) {
-		if (parsePacket(data)) {
+		if (parsePacket(data, &stats)) {
 			packetNr++;
 		}
 	}
@@ -318,6 +469,13 @@ int main(int argc, char *argv[]) {
 
 	pcap_close(pcap);
 
-	cout << "Bye!" << packetNr << endl;
+	if (server.empty()) {
+		cout << stats.print();
+	}
+	else {
+		// Send stats to server
+	}
+
 	return EXIT_SUCCESS;
 }
+
