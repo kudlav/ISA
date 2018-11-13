@@ -14,6 +14,8 @@
 #include <netinet/udp.h> // struct udphdr
 #include <arpa/inet.h> // htons, inet_pton
 #include <signal.h> // signal
+#include <iomanip> // put_time
+#include "time.h" // gmtime
 #include "struct.h"
 #include "stats.h"
 
@@ -26,7 +28,7 @@ static const char *base64table = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrst
 
 using namespace std;
 
-string dnsTypeName(int code);
+string dnsTypeName(unsigned int code);
 void printHelp();
 void parseArguments(int argc, char *argv[], string *file, string *interface, string *server, long *duration);
 unsigned int dnsDomain(const unsigned char *data, unsigned int octet, unsigned int dnsBase, string *name);

@@ -44,6 +44,10 @@ string dnsTypeName(unsigned int code) {
 			return "TXT";
 		case 28:
 			return "AAAA";
+		case 46:
+			return "RRSIG";
+		case 48:
+			return "DNSKEY";
 		default:
 			return "UNKNOWN";
 	}
@@ -365,14 +369,51 @@ unsigned int parseAnswers(const unsigned char *data, unsigned int octet, unsigne
 			rData += to_string(number) + ' ';
 			// Public Key
 			rData += getBase64(data, rdlenght - 4, &octet) + '"';
-			cout << rData << endl;
 			}break;
 
-
+		case 46: // RRSIG
+			{unsigned int number = 0;
+			time_t timeEpoch;
+			tm *timeStruct;
+			stringstream ss;
+			// Type Covered
+			rData += '"' + dnsTypeName(parseInt2(&octet, data)) + ' ';
+			// Algorithm
+			number = data[octet++];
+			rData += to_string(number) + ' ';
+			// Labels
+			number = data[octet++];
+			rData += to_string(number) + ' ';
+			// Original TTL
+			rData += to_string(parseInt4(&octet, data)) + ' ';
+			// Signature Expiration
+			timeEpoch = (time_t) parseInt4(&octet, data);
+			timeStruct = gmtime(&timeEpoch);
+			ss << put_time(timeStruct, "%Y%m%d%H%M%S");
+			rData += ss.str() + ' ';
+			ss.str(string()); // clear
+			// Signature Inception
+			timeEpoch = (time_t) parseInt4(&octet, data);
+			timeStruct = gmtime(&timeEpoch);
+			ss << put_time(timeStruct, "%Y%m%d%H%M%S");
+			rData += ss.str() + ' ';
+			ss.str(string()); // clear
+			// Key Tag
+			rData += to_string(parseInt2(&octet, data)) + ' ';
+			// Signer's Name
+			string name;
+			unsigned int nameLength = octet;
+			octet = dnsDomain(data, octet, dnsBase, &name);
+			nameLength = octet - nameLength;
+			rData += name + ' ';
+			// Signature
+			rData += getBase64(data, rdlenght - (nameLength + 18), &octet) + '"';
+			}break;
 
 		default:
-			cout << "!!! EMERGENCY !!! NOT IMPLEMENTED: " << typeCode << endl; // todo REMOVE BEFORE RELEASE!
-			exit(3);
+			octet += rdlenght;
+			cout << "TYPE " << typeCode << " NOT IMPLEMENTED !!!" << endl;
+			return octet;
 	}
 
 	dns_response response;
