@@ -42,12 +42,58 @@ string dnsTypeName(unsigned int code) {
 			return "MX";
 		case 16:
 			return "TXT";
+		case 17:
+			return "RP";
+		case 18:
+			return "AFSDB";
+		case 24:
+			return "SIG";
+		case 25:
+			return "KEY";
 		case 28:
 			return "AAAA";
+		case 29:
+			return "LOC";
+		case 33:
+			return "SRV";
+		case 35:
+			return "NAPTR";
+		case 36:
+			return "KX";
+		case 37:
+			return "CERT";
+		case 39:
+			return "DNAME";
+		case 42:
+			return "APL";
+		case 43:
+			return "DS";
+		case 44:
+			return "SSHFP";
+		case 45:
+			return "IPSECKEY";
 		case 46:
 			return "RRSIG";
+		case 47:
+			return "NSEC";
 		case 48:
 			return "DNSKEY";
+		case 49:
+			return "DHCID";
+		case 50:
+			return "NSEC3";
+		case 51:
+			return "NSEC3PARAM";
+		case 55:
+			return "HIP";
+		case 99:
+			return "SPF";
+		case 249:
+			return "TKEY";
+		case 250:
+			return "TSIG";
+		case 32769:
+			return "DLV";
 		default:
 			return "UNKNOWN";
 	}
@@ -131,6 +177,11 @@ unsigned int dnsDomain(const unsigned char *data, unsigned int octet, unsigned i
 		octet ++;
 	}
 	octet += 1;
+
+	if (name->empty()) {
+		*name += '.';
+	}
+
 	return octet;
 }
 
@@ -165,6 +216,10 @@ unsigned int parseInt2(unsigned int *octet, const unsigned char *data) {
 	number = data[(*octet)++] << 8;
 	number += data[(*octet)++];
 	return number;
+}
+
+unsigned int parseInt1(unsigned int *octet, const unsigned char *data) {
+	return data[(*octet)++];
 }
 
 unsigned int parseQuestion(const unsigned char *data, unsigned int octet) {
@@ -408,6 +463,47 @@ unsigned int parseAnswers(const unsigned char *data, unsigned int octet, unsigne
 			rData += name + ' ';
 			// Signature
 			rData += getBase64(data, rdlenght - (nameLength + 18), &octet) + '"';
+			}break;
+
+		case 47: // NSEC
+			{string name;
+			unsigned int recordEnd = octet + rdlenght;
+			// Next Domain Name
+			octet = dnsDomain(data, octet, dnsBase, &name);
+			rData += '"' + name + ' ';
+			// Type Bit Maps
+			unsigned int blockNr;
+			unsigned int bitmapLength;
+			unsigned int octetValue;
+			unsigned int bitValue;
+			while (octet < recordEnd) {
+				blockNr = data[octet++];
+				bitmapLength = data[octet++];
+				for (unsigned int octetPosition = 0; octetPosition < bitmapLength; octetPosition++) {
+					octetValue = data[octet++] ;
+					for (unsigned int bitPosition = 0; bitPosition < 8; bitPosition++) {
+						bitValue = (octetValue >> (7 - bitPosition) & 0x1);
+						if (bitValue) {
+							rData += dnsTypeName( (blockNr * 256) + (octetPosition * 8) + bitPosition ) + ' ';
+						}
+					}
+				}
+			}
+			}break;
+
+		case 43: // DS
+			{// Key Tag
+			rData += '"' + to_string(parseInt2(&octet, data)) + ' ';
+			// Algorithm
+			rData += to_string(parseInt1(&octet, data)) + ' ';
+			// Digest Type
+			rData += to_string(parseInt1(&octet, data)) + ' ';
+			// Digest
+			char hex[3];
+			for (unsigned int i = 0; i < (rdlenght - 4); i++) {
+				sprintf(hex, "%02X", data[octet++]);
+				rData += hex;
+			}
 			}break;
 
 		default:

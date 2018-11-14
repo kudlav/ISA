@@ -35,6 +35,7 @@ unsigned int dnsDomain(const unsigned char *data, unsigned int octet, unsigned i
 void dnsDomainFromPointer(const unsigned char *data, unsigned int octet, unsigned int dnsBase, string* name);
 unsigned int parseInt4(unsigned int *octet, const unsigned char *data);
 unsigned int parseInt2(unsigned int *octet, const unsigned char *data);
+unsigned int parseInt1(unsigned int *octet, const unsigned char *data);
 void setDnsFilter(pcap_t *pcap);
 unsigned int parseQuestion(const unsigned char *data, unsigned int octet);
 string getCanonicalIp(uint16_t origin[8]);
