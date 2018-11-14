@@ -164,25 +164,26 @@ void setDnsFilter(pcap_t *pcap) {
 	}
 }
 
-unsigned int dnsDomain(const unsigned char *data, unsigned int octet, unsigned int dnsBase, string *name) {
-	while (data[octet] != '\0' && data[octet] <= 63) {
-		unsigned int length = data[octet++];
+string dnsDomain(const unsigned char *data, unsigned int *octet, unsigned int dnsBase) {
+	string name;
+	while (data[*octet] != '\0' && data[*octet] <= 63) {
+		unsigned int length = data[(*octet)++];
 		for (unsigned int i = 0; i < length; i++) {
-			*name += data[octet++];
+			name += data[(*octet)++];
 		}
-		*name += '.';
+		name += '.';
 	}
-	if (data[octet] != '\0') {
-		dnsDomainFromPointer(data, octet, dnsBase, name);
-		octet ++;
+	if (data[*octet] != '\0') {
+		dnsDomainFromPointer(data, *octet, dnsBase, &name);
+		(*octet)++;
 	}
-	octet += 1;
+	(*octet) += 1;
 
-	if (name->empty()) {
-		*name += '.';
+	if (name.empty()) {
+		name += '.';
 	}
 
-	return octet;
+	return name;
 }
 
 void dnsDomainFromPointer(const unsigned char *data, unsigned int octet, unsigned int dnsBase, string *name) {
@@ -216,10 +217,6 @@ unsigned int parseInt2(unsigned int *octet, const unsigned char *data) {
 	number = data[(*octet)++] << 8;
 	number += data[(*octet)++];
 	return number;
-}
-
-unsigned int parseInt1(unsigned int *octet, const unsigned char *data) {
-	return data[(*octet)++];
 }
 
 unsigned int parseQuestion(const unsigned char *data, unsigned int octet) {
@@ -332,8 +329,7 @@ string getBase64(const unsigned char *data, unsigned int length, unsigned int *o
 
 unsigned int parseAnswers(const unsigned char *data, unsigned int octet, unsigned int dnsBase, Stats* stats) {
 	// NAME
-	string rName;
- 	octet = dnsDomain(data, octet, dnsBase, &rName);
+	string rName = dnsDomain(data, &octet, dnsBase);
 
 	// TYPE
 	unsigned int typeCode = parseInt2(&octet, data);
@@ -346,8 +342,7 @@ unsigned int parseAnswers(const unsigned char *data, unsigned int octet, unsigne
 	octet += 4;
 
 	// RDLENGTH
-	unsigned int rdlenght = data[octet++] << 8;
-	rdlenght += data[octet++];
+	unsigned int rdlenght = parseInt2(&octet, data);
 
 	// RDATA
 	string rData;
@@ -363,35 +358,31 @@ unsigned int parseAnswers(const unsigned char *data, unsigned int octet, unsigne
 			break;
 
 		case 15: // MX
-			{ // Preference
-			unsigned int preference = data[octet++] << 8;
-			preference += data[octet++];
-			rData += '"' + to_string(preference) + ' ';
-			octet = dnsDomain(data, octet, dnsBase, &rData);
-			rData += '"';
-			}break;
+			// Preference
+			rData += '"' + to_string(parseInt2(&octet, data)) + ' ';
+			// Exchange
+			rData += dnsDomain(data, &octet, dnsBase) + '"';
+			break;
 
 		case 2: // NS
-			octet = dnsDomain(data, octet, dnsBase, &rData);
+			rData += dnsDomain(data, &octet, dnsBase);
 			break;
 
 		case 5: // CNAME
-			octet = dnsDomain(data, octet, dnsBase, &rData);
+			rData += dnsDomain(data, &octet, dnsBase);
 			break;
 
 		case 6: // SOA
-			{rData += '"';
 			// Primary name server
-			octet = dnsDomain(data, octet, dnsBase, &rData);
-			rData += ' ';
+			rData += '"' + dnsDomain(data, &octet, dnsBase) + ' ';
 			// Responsible authority's mailbox
-			octet = dnsDomain(data, octet, dnsBase, &rData);
+			rData += dnsDomain(data, &octet, dnsBase);
 			// Serial number, Refresh interval, Retry interval, Expire limit, Minimum TTL
 			for (unsigned int i = 0; i < 5; i++) {
 				rData += ' ' + to_string(parseInt4(&octet, data));
 			}
 			rData += '"';
-			}break;
+			break;
 
 		case 16: // TXT
 			rData += '"';
@@ -406,39 +397,32 @@ unsigned int parseAnswers(const unsigned char *data, unsigned int octet, unsigne
 			uint16_t parts[8];
 			for (uint16_t &part : parts) {
 				// Convert to int (ommitting leading zeros)
-				part = data[octet++] << 8;
-				part += data[octet++];
+				part = (uint16_t) parseInt2(&octet, data);
 			}
 			rData += getCanonicalIp(parts);
 			break;
 
 		case 48: // DNSKEY
-			{unsigned int number = 0;
 			// Flags
 			rData += '"' + to_string(parseInt2(&octet, data)) + ' ';
 			// Protocol
-			number = data[octet++];
-			rData += to_string(number) + ' ';
+			rData += to_string(data[octet++]) + ' ';
 			// Algorithm
-			number = data[octet++];
-			rData += to_string(number) + ' ';
+			rData += to_string(data[octet++]) + ' ';
 			// Public Key
 			rData += getBase64(data, rdlenght - 4, &octet) + '"';
-			}break;
+			break;
 
 		case 46: // RRSIG
-			{unsigned int number = 0;
-			time_t timeEpoch;
+			{time_t timeEpoch;
 			tm *timeStruct;
 			stringstream ss;
 			// Type Covered
 			rData += '"' + dnsTypeName(parseInt2(&octet, data)) + ' ';
 			// Algorithm
-			number = data[octet++];
-			rData += to_string(number) + ' ';
+			rData += to_string(data[octet++]) + ' ';
 			// Labels
-			number = data[octet++];
-			rData += to_string(number) + ' ';
+			rData += to_string(data[octet++]) + ' ';
 			// Original TTL
 			rData += to_string(parseInt4(&octet, data)) + ' ';
 			// Signature Expiration
@@ -456,21 +440,17 @@ unsigned int parseAnswers(const unsigned char *data, unsigned int octet, unsigne
 			// Key Tag
 			rData += to_string(parseInt2(&octet, data)) + ' ';
 			// Signer's Name
-			string name;
 			unsigned int nameLength = octet;
-			octet = dnsDomain(data, octet, dnsBase, &name);
+			rData += dnsDomain(data, &octet, dnsBase) + ' ';
 			nameLength = octet - nameLength;
-			rData += name + ' ';
 			// Signature
 			rData += getBase64(data, rdlenght - (nameLength + 18), &octet) + '"';
 			}break;
 
 		case 47: // NSEC
-			{string name;
-			unsigned int recordEnd = octet + rdlenght;
+			{unsigned int recordEnd = octet + rdlenght;
 			// Next Domain Name
-			octet = dnsDomain(data, octet, dnsBase, &name);
-			rData += '"' + name + ' ';
+			rData += '"' + dnsDomain(data, &octet, dnsBase) + ' ';
 			// Type Bit Maps
 			unsigned int blockNr;
 			unsigned int bitmapLength;
@@ -495,9 +475,9 @@ unsigned int parseAnswers(const unsigned char *data, unsigned int octet, unsigne
 			{// Key Tag
 			rData += '"' + to_string(parseInt2(&octet, data)) + ' ';
 			// Algorithm
-			rData += to_string(parseInt1(&octet, data)) + ' ';
+			rData += to_string(data[octet++]) + ' ';
 			// Digest Type
-			rData += to_string(parseInt1(&octet, data)) + ' ';
+			rData += to_string(data[octet++]) + ' ';
 			// Digest
 			char hex[3];
 			for (unsigned int i = 0; i < (rdlenght - 4); i++) {
