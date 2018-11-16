@@ -4,8 +4,7 @@
 #ifndef PROJEKT_STATS_H
 #define PROJEKT_STATS_H
 
-#include <vector> // vector
-#include <string> // string
+#include "library.h"
 #include "struct.h" // dns_response
 
 using namespace std;
@@ -17,6 +16,7 @@ class Stats {
 		Stats();
 		void add(dns_response record);
 		string print();
+		bool send(int sock, struct sockaddr_in *serverAddr);
 };
 
 

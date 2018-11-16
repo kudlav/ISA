@@ -536,6 +536,37 @@ bool parsePacket(const unsigned char *data, Stats *stats) {
 	return true;
 }
 
+void sendStats(Stats *stats, string address) {
+
+	/* DNS lookup for host address */
+	struct hostent *server = gethostbyname(address.c_str());
+	if (server == nullptr) {
+		cerr << "CHYBA: adresa serveru nenalezena\n";
+		exit(EXIT_NET);
+	}
+
+	/* Create socket */
+	int sock = socket(AF_INET, SOCK_DGRAM, 0); // AF_INET = IPv4, SOCK_STREAM = UDP
+	if (sock < 0) {
+		cerr << "CHYBA: nelze vytvorit socket\n";
+		exit(EXIT_NET);
+	}
+
+	/* Prepare address for connection */
+	struct sockaddr_in serverAddr;
+	memset((char *) &serverAddr, 0, sizeof(serverAddr)); // Null undefined values
+	memcpy((char *) &serverAddr.sin_addr.s_addr, server->h_addr, (size_t) server->h_length);
+	serverAddr.sin_family = AF_INET;
+	serverAddr.sin_port = htons(514); // convert to uint16_t
+
+	/* Send query */
+	if (!(stats->send(sock, &serverAddr))) {
+		cerr << "CHYBA: Chyba pri zasilani pozadavku\n";
+		exit(EXIT_NET);
+	}
+
+}
+
 void quit(int signum) {
 	if (signum == SIGUSR1) {
 		cout << stats.print();
@@ -590,9 +621,9 @@ int main(int argc, char *argv[]) {
 		cout << stats.print();
 	}
 	else {
+		sendStats(&stats, server);
 		// Send stats to server
 	}
 
 	return EXIT_SUCCESS;
 }
-

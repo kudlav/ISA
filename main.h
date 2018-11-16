@@ -5,24 +5,9 @@
 #ifndef PROJEKT_MAIN_H
 #define PROJEKT_MAIN_H
 
-/* Requirements */
-#include <iostream> // IO operations
-#include <unistd.h> // getopt
-#include <pcap/pcap.h> // pcap
-#include <netinet/if_ether.h> // struct ether_header
-#include <netinet/ip.h> // struct ip
-#include <netinet/udp.h> // struct udphdr
-#include <arpa/inet.h> // htons, inet_pton
-#include <signal.h> // signal
-#include <iomanip> // put_time
-#include "time.h" // gmtime
+#include "library.h"
 #include "struct.h"
 #include "stats.h"
-
-/* Error codes: */
-#define EXIT_ARG 1 // error when parsing arguments
-#define EXIT_IOE 2 // I/O error
-#define EXIT_INT 3 // internal error
 
 static const char *base64table = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
