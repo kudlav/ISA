@@ -567,16 +567,15 @@ void sendStats(Stats *stats, string address) {
 
 }
 
-void quit(int signum) {
+void dump(int signum) {
 	if (signum == SIGUSR1) {
 		cout << stats.print();
 	}
-	exit(EXIT_SUCCESS);
 }
 
 int main(int argc, char *argv[]) {
 
-	signal(SIGUSR1, quit);
+	signal(SIGUSR1, dump);
 
 	string file;
 	string interface;
@@ -586,10 +585,9 @@ int main(int argc, char *argv[]) {
 	parseArguments(argc, argv, &file, &interface, &server, &duration);
 
 	pcap_t *pcap;
+	char errbuf[PCAP_ERRBUF_SIZE];
 
 	if (!file.empty()) {
-		char errbuf[PCAP_ERRBUF_SIZE];
-
 		pcap = pcap_open_offline(file.c_str(), errbuf);
 
 		if (pcap == NULL) {
@@ -597,15 +595,26 @@ int main(int argc, char *argv[]) {
 			exit(EXIT_IOE);
 		}
 	}
+	else if (!interface.empty()) {
+		if ((errbuf) == NULL) cout << errbuf << endl;
+		pcap = pcap_open_live(interface.c_str(), 1518, 0, 0, errbuf);
+		if (pcap == NULL) {
+			cerr << "CHYBA zachytavani zarizeni '" << interface << "':" << endl << errbuf << endl;
+			exit(EXIT_IOE);
+		}
+	}
+	else {
+		cerr << "CHYBA: musi byt zadan bud prepinac -i nebo -r" << endl;
+		printHelp();
+	}
+
 
 	setDnsFilter(pcap); // exit(EXIT_INT);
 
-	struct pcap_pkthdr *header;
+	struct pcap_pkthdr header;
 	const unsigned char *data;
-	int err;
 	unsigned int packetNr = 0;
-
-	while ((err = pcap_next_ex(pcap, &header, &data)) == 1) {
+	while ((data = pcap_next(pcap, &header))) {
 		if (parsePacket(data, &stats)) {
 			packetNr++;
 		}
@@ -617,12 +626,11 @@ int main(int argc, char *argv[]) {
 
 	pcap_close(pcap);
 
+	// Send stats to server
+	//sendStats(&stats, server);
+
 	if (server.empty()) {
 		cout << stats.print();
-	}
-	else {
-		sendStats(&stats, server);
-		// Send stats to server
 	}
 
 	return EXIT_SUCCESS;

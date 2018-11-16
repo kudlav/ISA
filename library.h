@@ -23,7 +23,7 @@
 #include "time.h" // gmtime, time
 
 #ifdef _WIN32
-#include <winsock.h>
+//#include <winsock.h>
 #endif
 
 /* Error codes: */
