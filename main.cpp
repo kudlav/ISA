@@ -416,7 +416,7 @@ unsigned int parseAnswers(const unsigned char *data, unsigned int octet, unsigne
 		case 46: // RRSIG
 			{time_t timeEpoch;
 			tm *timeStruct;
-			stringstream ss;
+			char timeStr[15];
 			// Type Covered
 			rData += '"' + dnsTypeName(parseInt2(&octet, data)) + ' ';
 			// Algorithm
@@ -428,15 +428,15 @@ unsigned int parseAnswers(const unsigned char *data, unsigned int octet, unsigne
 			// Signature Expiration
 			timeEpoch = (time_t) parseInt4(&octet, data);
 			timeStruct = gmtime(&timeEpoch);
-			ss << put_time(timeStruct, "%Y%m%d%H%M%S");
-			rData += ss.str() + ' ';
-			ss.str(string()); // clear
+			strftime(timeStr, sizeof(timeStr), "%Y%m%d%H%M%S", timeStruct);
+			rData += timeStr;
+			rData += ' ';
 			// Signature Inception
 			timeEpoch = (time_t) parseInt4(&octet, data);
 			timeStruct = gmtime(&timeEpoch);
-			ss << put_time(timeStruct, "%Y%m%d%H%M%S");
-			rData += ss.str() + ' ';
-			ss.str(string()); // clear
+			strftime(timeStr, strlen(timeStr), "%Y%m%d%H%M%S", timeStruct);
+			rData += timeStr;
+			rData += ' ';
 			// Key Tag
 			rData += to_string(parseInt2(&octet, data)) + ' ';
 			// Signer's Name
