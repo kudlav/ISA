@@ -8,8 +8,7 @@ dns-export \- parse DNS (Domain Name System) packets and export statistics to ce
 [\fB\-s\fR \fISERVER\fR]
 [\fB\-t\fR \fIINTERVAL\fR]
 .SH DESCRIPTION
-.B dns-export
-parses DNS (Domain Name System) packets from pcap file or by sniffing interface and creates agregated statistics that can be printed to stdout or sent to a syslog server
+.B dns-export parses DNS (Domain Name System) packets from pcap file or by sniffing interface and creates agregated statistics that can be printed to stdout or sent to a syslog server. Program supports the following DNS types: A, MX, NS, CNAME, SOA, TXT, AAAA, DNSKEY, RRSIG, NSEC, DS.
 .SH OPTIONS
 .TP
 .BR \-r =\fIFILE\fR
