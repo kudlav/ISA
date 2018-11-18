@@ -1,0 +1,69 @@
+.TH dns-export 1
+.SH NAME
+dns-export \- parse DNS (Domain Name System) packets and export statistics to central log server
+.SH SYNOPSIS
+.B dns-export
+[\fB\-r\fR \fIFILE\fR]
+[\fB\-i\fR \fIINTERFACE\fR]
+[\fB\-s\fR \fISERVER\fR]
+[\fB\-t\fR \fIINTERVAL\fR]
+.SH DESCRIPTION
+.B dns-export
+parses DNS (Domain Name System) packets from pcap file or by sniffing interface and creates agregated statistics that can be printed to stdout or sent to a syslog server
+.SH OPTIONS
+.TP
+.BR \-r =\fIFILE\fR
+Parse packets from pcap file.
+When finished, print stats to stdout or send to syslog server if the \fISERVER\fR is set.
+Cannot be used both with -r or -t.
+.TP
+.BR \-i =\fIINTERFACE\fR
+Sniff this network interface to get packets.
+Set "any" to sniff from all interfaces.
+Program will periodically send stats to syslog server.
+To stop sniffing, send CTRL+C to the program.
+If you want to print stats to stdout, send SIGUSR1 to the program.
+Cannot be used both with -i.
+.TP
+.BR \-s =\fISERVER\fR
+Specify hostname/ipv4/ipv6 address of syslog server to send statistics to that server.
+Stats will be sent periodically when sniffing or after processing the whole pcap file.
+.TP
+.BR \-t =\fIINTERVAL\fR
+Interval in seconds in which stats are sent to syslog server.
+Default value is 60.
+Can be used only with \fISERVER\fR option.
+.SH EXAMPLES
+To write stats to the standard output from dump.pcap use command:
+.PP
+.nf
+.RS
+dns-export -r dump.pcap
+.RE
+.fi
+.PP
+To send stats from "ens33" network interface every 5 seconds to "syslog.fit.vutbr.cz" server use command:
+.PP
+.nf
+.RS
+dns-export -i ens33 -t 5 -s syslog.fit.vutbr.cz
+.SH EXIT STATUS
+.TP
+.BR 0
+program finished successfully
+.TP
+.BR 1
+error when parsing arguments
+.TP
+.BR 2
+input/output error
+.TP
+.BR 3
+internal error
+.TP
+.BR 4
+network error
+.SH BUGS
+At this moment the parser is able to handle only DNS packets over UTP, TCP packets are thrown out.
+.SH AUTHORS
+Written by Vladan Kudlac.
