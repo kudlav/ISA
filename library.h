@@ -1,5 +1,5 @@
 //
-// Created by Vladan on 15.11.2018.
+// Created by Vladan Kudlac on 14.10.2018.
 //
 
 #ifndef PROJEKT_LIBRARY_H
@@ -15,16 +15,14 @@
 #include <netinet/ip.h> // struct ip, sockaddr_in
 #include <netinet/udp.h> // struct udphdr
 #include <arpa/inet.h> // htons, inet_pton
-#include <sys/types.h> // sendto
+#include <sys/types.h> // sendto, getaddrinfo
+#include <sys/socket.h> // getaddrinfo
 #include <signal.h> // signal
-#include <netdb.h> // gethostbyname
+#include <netdb.h> // getaddrinfo
 #include <vector> // vector
 #include <ctime> // ctime
 #include "time.h" // gmtime, time
-
-#ifdef _WIN32
-//#include <winsock.h>
-#endif
+#include <thread>
 
 /* Error codes: */
 #define EXIT_ARG 1 // error when parsing arguments

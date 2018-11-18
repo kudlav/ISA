@@ -1,5 +1,5 @@
 //
-// Created by Vladan on 14.10.2018.
+// Created by Vladan Kudlac on 14.10.2018.
 //
 
 #ifndef PROJEKT_MAIN_H
@@ -24,8 +24,8 @@ void setDnsFilter(pcap_t *pcap);
 unsigned int parseQuestion(const unsigned char *data, unsigned int octet);
 string getCanonicalIp(uint16_t origin[8]);
 string getBase64(const unsigned char *data, unsigned int length, unsigned int *octet);
-unsigned int parseAnswers(const unsigned char *data, unsigned int octet, unsigned int dnsBase, Stats* stats);
-bool parsePacket(const unsigned char *data, Stats *stats);
+unsigned int parseAnswers(const unsigned char *data, unsigned int octet, unsigned int dnsBase);
+bool parsePacket(const unsigned char *data);
 void quit(int signum);
 int main(int argc, char *argv[]);
 

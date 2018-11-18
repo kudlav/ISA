@@ -1,5 +1,6 @@
-// todo: 1. Kontrolovat ID odpovědí, zpracovávat pouze první odpověď na daný dotaz.
-// todo 2. Přepínač -r a -t současně
+//
+// Created by Vladan Kudlac on 14.10.2018.
+//
 
 #include "main.h"
 
@@ -100,38 +101,53 @@ string dnsTypeName(unsigned int code) {
 }
 
 void printHelp() {
+	cout << "Pouziti:  dns-export [-r file] [-i interface] [-s server] [-t interval]" << endl;
+	cout << "Parametry:  file       zpracuje se pcap soubor" << endl;
+	cout << "            interface  program bude naslouchat na danem sitovem rozhrani" << endl;
+	cout << "            server     hostname/ipv4/ipv6 adresa syslog serveru pro odeslani statistik" << endl;
+	cout << "            interval   doba vypoctu statistik, vychozi hodnota 60 sekund, pouzitelne pouze s parametrem server" << endl;
 	exit(EXIT_ARG);
 }
 
 void parseArguments(int argc, char **argv, string *file, string *interface, string *server, long *duration) {
 	int opt;
-	while ((opt = getopt(argc, argv, "r:i:s:t:")) != -1) {
+	while ((opt = getopt(argc, argv, "hr:i:s:t:")) != -1) {
 		switch (opt) {
+			case 'h':
+				printHelp();
+				break;
 			case 'r':
-				if (interface->empty()) {
-					*file = optarg;
-				} else {
+				if (!(interface->empty())) {
 					cerr << "CHYBA: parametr -r nelze pouzit spolecne s -i" << endl;
-					printHelp();
+					printHelp(); // EXIT_ARG
 				}
+				if (*duration != 0) {
+					cerr << "CHYBA: parametr -r nelze pouzit spolecne s -t" << endl;
+					printHelp(); // EXIT_ARG
+				}
+				*file = optarg;
 				break;
 			case 'i':
-				if (file->empty()) {
-					*interface = optarg;
-				} else {
+				if (!(file->empty())) {
 					cerr << "CHYBA: parametr -i nelze pouzit spolecne s -r" << endl;
-					printHelp();
+					printHelp(); // EXIT_ARG
 				}
+				*interface = optarg;
 				break;
 			case 's':
 				*server = optarg;
 				break;
 			case 't':
+				if (!(file->empty())) {
+					cerr << "CHYBA: parametr -t nelze pouzit spolecne s -r" << endl;
+					printHelp(); // EXIT_ARG
+				}
+
 				char *endptr;
 				*duration = strtol(optarg, &endptr, 10);
 				if (*endptr != '\0' || *duration <= 0) {
 					cerr << "CHYBA: hodnota parametru -t musi byt cele cislo vetsi nez 0" << endl;
-					printHelp(); // exit(EXIT_ARG)
+					printHelp(); // EXIT_ARG
 				}
 				break;
 			case '?':
@@ -327,7 +343,7 @@ string getBase64(const unsigned char *data, unsigned int length, unsigned int *o
 	return base64out;
 }
 
-unsigned int parseAnswers(const unsigned char *data, unsigned int octet, unsigned int dnsBase, Stats* stats) {
+unsigned int parseAnswers(const unsigned char *data, unsigned int octet, unsigned int dnsBase) {
 	// NAME
 	string rName = dnsDomain(data, &octet, dnsBase);
 
@@ -496,12 +512,12 @@ unsigned int parseAnswers(const unsigned char *data, unsigned int octet, unsigne
 	response.domainName = rName;
 	response.rrType = rType;
 	response.rrAnswer = rData;
-	stats->add(response);
+	stats.add(response);
 
 	return octet;
 }
 
-bool parsePacket(const unsigned char *data, Stats *stats) {
+bool parsePacket(const unsigned char *data) {
 	// Switch between length of IPv4 or IPv6 header
 	unsigned int sizeOfHeaders = sizeof(struct ether_header) + sizeof(struct udphdr);
 	uint8_t version = (uint8_t) (data[sizeof(struct ether_header)] >> 4);
@@ -530,40 +546,43 @@ bool parsePacket(const unsigned char *data, Stats *stats) {
 
 	unsigned int answers = htons(dns->answers);
 	for (unsigned int i = 0; i < answers; i++) {
-		octet = parseAnswers(data, octet, sizeOfHeaders, stats);
+		octet = parseAnswers(data, octet, sizeOfHeaders);
 	}
 
 	return true;
 }
 
-void sendStats(Stats *stats, string address) {
+void sendStats(string address, int interval) {
 
 	/* DNS lookup for host address */
-	struct hostent *server = gethostbyname(address.c_str());
-	if (server == nullptr) {
+	struct addrinfo hints;
+	struct addrinfo *server;
+
+	memset (&hints, 0, sizeof (hints));
+	hints.ai_family=AF_UNSPEC;
+	hints.ai_socktype=SOCK_DGRAM;
+	hints.ai_protocol=0;
+	hints.ai_flags=AI_ADDRCONFIG;
+	if (getaddrinfo(address.c_str(), "514", &hints, &server)) {
 		cerr << "CHYBA: adresa serveru nenalezena\n";
 		exit(EXIT_NET);
 	}
 
 	/* Create socket */
-	int sock = socket(AF_INET, SOCK_DGRAM, 0); // AF_INET = IPv4, SOCK_STREAM = UDP
+	int sock = socket(server->ai_family,SOCK_DGRAM,server->ai_protocol);
 	if (sock < 0) {
 		cerr << "CHYBA: nelze vytvorit socket\n";
 		exit(EXIT_NET);
 	}
 
-	/* Prepare address for connection */
-	struct sockaddr_in serverAddr;
-	memset((char *) &serverAddr, 0, sizeof(serverAddr)); // Null undefined values
-	memcpy((char *) &serverAddr.sin_addr.s_addr, server->h_addr, (size_t) server->h_length);
-	serverAddr.sin_family = AF_INET;
-	serverAddr.sin_port = htons(514); // convert to uint16_t
-
 	/* Send query */
-	if (!(stats->send(sock, &serverAddr))) {
-		cerr << "CHYBA: Chyba pri zasilani pozadavku\n";
-		exit(EXIT_NET);
-	}
+	do {
+		sleep(interval);
+		if (!(stats.send(sock, server))) {
+			cerr << "CHYBA: Chyba pri zasilani pozadavku\n";
+			exit(EXIT_NET);
+		}
+	} while (interval);
 
 }
 
@@ -580,16 +599,20 @@ int main(int argc, char *argv[]) {
 	string file;
 	string interface;
 	string server;
-	long duration = 60;
+	long duration = 0;
 
 	parseArguments(argc, argv, &file, &interface, &server, &duration);
+
+	if (!interface.empty()) {
+		thread t1(sendStats, server, duration);
+		t1.detach();
+	}
 
 	pcap_t *pcap;
 	char errbuf[PCAP_ERRBUF_SIZE];
 
 	if (!file.empty()) {
 		pcap = pcap_open_offline(file.c_str(), errbuf);
-
 		if (pcap == NULL) {
 			cerr << "CHYBA cteni souboru '" << file << "':" << endl << errbuf << endl;
 			exit(EXIT_IOE);
@@ -615,22 +638,18 @@ int main(int argc, char *argv[]) {
 	const unsigned char *data;
 	unsigned int packetNr = 0;
 	while ((data = pcap_next(pcap, &header))) {
-		if (parsePacket(data, &stats)) {
+		if (parsePacket(data)) {
 			packetNr++;
 		}
 	}
 
-	if (err == -1) {
-		cerr << "CHYBA behem zpracovavani " << packetNr + 1 << ". paketu" << endl;
-	}
-
 	pcap_close(pcap);
-
-	// Send stats to server
-	//sendStats(&stats, server);
 
 	if (server.empty()) {
 		cout << stats.print();
+	}
+	else {
+		sendStats(server, 0);
 	}
 
 	return EXIT_SUCCESS;

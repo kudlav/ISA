@@ -1,6 +1,7 @@
 //
-// Created by Vladan on 14.10.2018.
+// Created by Vladan Kudlac on 14.10.2018.
 //
+
 #ifndef PROJEKT_STATS_H
 #define PROJEKT_STATS_H
 
@@ -16,7 +17,7 @@ class Stats {
 		Stats();
 		void add(dns_response record);
 		string print();
-		bool send(int sock, struct sockaddr_in *serverAddr);
+		bool send(int sock, struct addrinfo *serverAddr);
 };
 
 

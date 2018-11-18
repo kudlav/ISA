@@ -1,5 +1,5 @@
 //
-// Created by Vladan on 14.10.2018.
+// Created by Vladan Kudlac on 14.10.2018.
 //
 
 #include "stats.h"
@@ -28,7 +28,7 @@ string Stats::print() {
 	return records;
 }
 
-bool Stats::send(int sock, struct sockaddr_in *serverAddr) {
+bool Stats::send(int sock, struct addrinfo *serverAddr) {
 
 	char hostname[255];
 	gethostname(hostname, sizeof(hostname));
@@ -44,10 +44,8 @@ bool Stats::send(int sock, struct sockaddr_in *serverAddr) {
 		msg += " ";
 		msg += hostname;
 		msg += " dns-export - - - " + item.domainName + " " + item.rrType + " " + item.rrAnswer + " " + to_string(item.count);
-		cout << "send" << endl;
-		ssize_t sent = sendto(sock, msg.c_str(), msg.size(), 0, (const struct sockaddr*) serverAddr, sizeof(*serverAddr));
+		ssize_t sent = sendto(sock, msg.c_str(), msg.size(), 0, serverAddr->ai_addr, serverAddr->ai_addrlen);
 		if (sent != (ssize_t) msg.size()) return false;
-		cout << "ok" << endl;
 	}
 
 	return true;
