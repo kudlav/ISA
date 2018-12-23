@@ -156,7 +156,7 @@ void parseArguments(int argc, char **argv, string *file, string *interface, stri
 				} else {
 					cerr << "CHYBA: neznamy parametr -" << (char) optopt << endl;
 				}
-				[[fallthrough]];
+				/* [[fallthrough]]; */
 			default:
 				printHelp(); // exit(EXIT_ARG)
 		}
@@ -603,7 +603,7 @@ int main(int argc, char *argv[]) {
 
 	parseArguments(argc, argv, &file, &interface, &server, &duration);
 
-	if (!interface.empty()) {
+	if ((!interface.empty()) && (!server.empty())) {
 		thread t1(sendStats, server, duration);
 		t1.detach();
 	}

@@ -1,0 +1,140 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[czech]{babel}
+\usepackage[T1]{fontenc}
+\usepackage[left=2cm,top=3cm,text={17cm, 24cm}]{geometry}
+\usepackage{times}
+\author{Vladan Kudláč}
+
+\usepackage{graphics}
+\usepackage{picture}
+\usepackage{listings}
+\usepackage{float}
+\usepackage{url}
+
+\begin{document}
+\begin{titlepage}
+\begin{center}
+	\textsc{
+		{\Huge Vysoké učení technické v~Brně} \\
+		\medskip
+		{\huge Fakulta informačních technologií} \\
+	}
+	\vspace{\stretch{0.1}}
+	\includegraphics{logoFIT.eps}
+	\vspace{\stretch{0.282}}
+	
+	{\LARGE Síťové aplikace a správa sítí} \\
+	\medskip
+	{\Huge Export DNS informací pomocí protokolu Syslog}
+	\vspace{\stretch{0.618}}
+	
+	{\Large 14. října 2018 \hfill Vladan Kudláč}
+\end{center}
+\end{titlepage}
+
+\tableofcontents
+\pagebreak
+
+\section{Úvod}
+Prohlašuji, že jsem tuto semestrální práci vypracoval samostatně. Dokumentace a vestavěná nápověda je psána v češtině. Manuálová stránka je stejně jako samotný kód psána v angličtině.
+
+Cílem projektu bylo vytvořit aplikaci, která bude umět zpracovávat data protokolu DNS (Domain Name System) a vybrané statistiky exportovat pomocí protokolu Syslog na centrální logovací server.
+
+\section{Návrh a implementace}
+\subsection{Zpracovávání paketů}
+Pro úspěšné zpracování DNS paketu je nutné pochopit princip knihovny pcap. Knihovna nabízí funkce pro zachytávání provozu ze síťového rozhraní i pro čtení ze souboru. Načtený paket je uložen v hexadecimální podobě v poli 8b hodnot. Při studování principu načítání, filtrování a získávání paketů jsem používal manuálové stránky na internetových portálech \url{https://liw.fi/manpages}, \url{http://www.cplusplus.com} a \url{http://man7.org}. Tyto stránky jsem využíval kdykoliv, kdy jsem potřeboval zjistit správné užití funkcí.
+
+Služba DNS je protokol aplikační vrstvy \cite{dns-prez} a je tedy nutné nejprve zpracovat ethernetovou, internetovou a UDP hlavičku. V ethernetové hlavičce zjistím verzi IP (4 nebo 6) a poté skočím na začátek DNS dat.
+
+DNS obsahuje hlavičku a seznamy s dotazy a odpověďmi, viz RFC1035 \cite{rfc1035}. V DNS hlavičce zjišťuji v příznacích zda se jedná o dotaz nebo odpověď. Dotazy zahazuji. Poté zjistím počet položek v sekcích \texttt{Questions} a \texttt{RRs answer}. Sekci \texttt{Questions} je nutné projít, aby jsme se dostali k sekci \texttt{RRs answer}.
+
+Sekci \texttt{RRs answer} zpracovávám po jednotlivých položkách, vzájemně se neovlivňují. Nejprve zpracuji pložku \texttt{NAME}, kterou využívám ve statistikách pro \textbf{domain-name}. Název zpracovávám rekurzivně, aplikace si poradí i s vícenásobným odkazem. Hned poté následuje hodnota \texttt{TYPE}, která slouží pro druhou hodnotu \textbf{rr-type}. Aplikace rozpoznává celkem 42 typů \cite{dns-types}, ale jen některé zpracovává. Poté přeskočím položky \texttt{CLASS} a \texttt{TTL} a uložím si hodnotu \texttt{RDLENGTH}. Následují samotná data formátovaná dle daného typu. V tuto chvíli se aplikace podívá na typ DNS záznamu, a pokud se nejedná o jeden z následujících typů: A, MX, NS, CNAME, SOA, TXT, AAAA, DNSKEY, RRSIG, NSEC nebo DS, tak s pomocí \texttt{RDLENGTH} skočí na další záznam.
+
+Data pro \textbf{rr-answer} jsou formátována stejně, jako v programu \texttt{dig}. Pokud je zobrazeno více hodnot, jsou tyto hodnoty obaleny do uvozovek. Pro konkrétní formát vyhledejte manuálovou stránku programu \texttt{dig}.
+
+Záznamy typu DNSKEY, RRSIG, NSEC a DS jsou součástí DNSSEC, který je implementován na základě informací v RFC4034 \cite{rfc4034}. Formáty DNSKEY a RRSIG vyžadovaly implementovat vlastní base64 enkodér. Enkodér byl implementován na základě RFC4648 \cite{rfc4648}. Dalším obzvlášť komplikovaným typem je \texttt{NSEC}, které obsahuje bitové pole s kompresí hodnot. Při implementaci jsem sbíral údaje z RFC4034 a z knihy \uv{TCP/IP Illustrated, Volume 1: The Protocols} \cite{fall2011tcp}.
+
+\subsection{Ukládání statistik}
+Pro ukládání statistik používám globální proměnnou, která je instancí objektu Stats. V projektu jsem si vyzkoušel objektové programování v C++ na základě informací z portálu Geeksforgeeks.org \cite{cpp-objects}. Objekt Stats má funkci \texttt{add} pro přidání záznamu do statistik, \texttt{print} pro výpis na standardní výstup a \texttt{send} pro odeslání na Syslog server. Hodnoty statistik jsou ukládány v poli jako struktura s položkami:
+\begin{lstlisting}[language=C++]
+typedef struct dns_response {
+	string domainName;
+	string rrType;
+	string rrAnswer;
+	unsigned int count;
+} dns_response;
+\end{lstlisting}
+
+\subsection{Odesílání statistik}
+V případě, že není zadán server pro odesílání statistik, jsou na konci zpracování pcap souboru vytištěny statistiky funkcí \texttt{print} objektu Stats. Pokud se zpracovávají pakety z rozhraní, nic se nevypisuje.
+
+Hned po spuštění se zaregistruje obsluha signálu \texttt{SIGUSR1}. Při příchodu signálu \texttt{SIGUSR1} dojde k paralelnímu vykonaní funkce, která vytiskne statistiku na standardní výstup. Při implementaci jsem se inspiroval článkem na Geeksforgeeks.org \cite{signals}.
+
+Pokud byl zadán server pro odesílání statistik a zároveň se pakety získávají ze síťového rozhraní, dojde před zahájením zpracování paketů k vytvoření druhého vlákna \cite{threads}, které střídavě čeká po zadanou dobu a poté odesílá statistiky na Syslog server. Při čtení ze souboru jsou statistiky odeslány po zpracování souboru.
+
+Příjem Syslog zpráv jsem zkoumal pomocí programu Wireshark a také nakonfigurováním RSYSLOG serveru ve virtuálním stroji CentOS7. RSYSLOG jsem dokázal nakonfigurovat dle návodu na portálu Tecmint \cite{syslog-setup}. Zprávy zasílám pomocí UDP. Každá statistika je v samostatné zprávě. Formát Syslog zpráv vychází ze zadání a ze standardu RFC5424 \cite{rfc5424}.
+
+\section{Uživatelská příručka}
+Projekt ISA: Export DNS informací pomocí protokolu Syslog. Verze 1.0 (19. 11. 2018).\\
+Aplikace zpracovává DNS (Domain Name System) pakety z pcap souboru nebo získané odchytáváním komunikace na síťovém rozhraní a vytváří z nich agregované statistiky, které buď tiskne na standardní výstup, nebo je zasílá na Syslog server. Program umí zpracovávat následující typu DNS záznamů: A, MX, NS, CNAME, SOA, TXT, AAAA, DNSKEY, RRSIG, NSEC, DS. Jakýkoliv jiný záznam není započten do statistiky.
+
+\subsection{Požadavky}
+Program lze přeložit v překladači podporující standard \textit{C++11}. Doporučuje se překladač \textbf{\textit{gcc} verze 4.8.5 a novější}. Pro starší verze nebyl program testován.
+Program byl testován na následujících konfiguracích:
+\begin{itemize}
+\item GCC 7.3.0 (Ubuntu x86\_64-linux-gnu) -- Merlin + lokální vývoj
+\item GCC 4.8.5 (CentOS x86\_64-redhat-linux) -- Virtuální stroj
+\end{itemize}
+\subsubsection*{Knihovny potřebné k překladu}
+\begin{itemize}
+	\item pcap/pcap.h (nemusí být součástí běžných distribucí)
+	\item iostream
+	\item sstream
+	\item string.h
+	\item unistd.h
+	\item netinet/if\_ether.h
+	\item netinet/ip.h
+	\item netinet/udp.h
+	\item arpa/inet.h
+	\item sys/types.h
+	\item sys/socket.h
+	\item signal.h
+	\item netdb.h
+	\item vector
+	\item ctime
+	\item time.h
+	\item thread
+\end{itemize}
+
+\subsection{Překlad}
+Překlad lze provést programem \textit{make}. Pro přeložení zadejte příkaz \textit{make all} v adresáři s projektem. Pokud není možné použít program \textit{make}, lze programy přeložit následujícím příkazem:
+\begin{lstlisting}
+g++ -std=c++11 -static-libstdc++ main.cpp stats.cpp -o dns-export -lpcap -pthread
+\end{lstlisting}
+
+\subsection{Spuštění}
+./dns-export [-r FILE] [-i INTERFACE] [-s SERVER] [-t INTERVAL]
+\begin{itemize}
+\item \texttt{-r FILE} -- Zpracuje pakety ze zadaného \texttt{pcap} souboru. Po dokončení tiskne statistiku na standardní výstup nebo ji zasílá na Syslog server (v případě použití parametru SERVER). Nelze použít společně s parametry -r nebo -t.
+\item \texttt{-i INTERFACE} -- Pakety budou zachytávány ze zadaného rozhraní. Zadejte \uv{any} pro zachytávání všech rozhraní. Program zasílá v časovém intervalu statistiky na Syslog server dokud není ukončen klávesou \texttt{CTRL+C}. Při obdržení signálu \texttt{SIGUSR1} tiskne statistiku na standardní výstup. Nelze použít společně s parametrem -i
+\item \texttt{-s SERVER} -- Adresa (jmenná, IPv4 nebo IPv6) Syslog serveru pro zasílání statistik. Statistiky jsou zasílány v časových intervalech nebo po zpracování souboru.
+\item \texttt{-t INTERVAL} -- Časový interval (v sekundách) zasílání statistik na Syslog server. Výchozí hodnota 60 s. Lze použít pouze s přepínačem -s.
+\end{itemize}
+
+\subsection{Chybové kódy}
+\begin{itemize}
+\item 0 -- program skončil v pořádku
+\item 1 -- chyba při zpracování argumentu
+\item 2 -- chyba práce se soubory (vstupně/výstupní chyba)
+\item 3 -- systémová chyba (chyba filtrování paketů)
+\item 4 -- chyba síťového rozhraní (např. nelze vytvořit soket)
+\end{itemize}
+
+\section{Závěr}
+Program byl testován na referenčním virtuálním stroji pro předmět ISA a na serveru Merlin. Kromě chybějící podpory pro pakety skrze UDP není znám žádný problém nebo omezení. Protokol UDP jsem neimplementoval, neboť jsem přesáhl hranici 40 hodin čisté práce, kterou jsem si pro tento projekt stanovil. Při implementaci jsem se opíral zejména o specifikace a oficiální dokumentaci.
+
+\bibliographystyle{czechiso}
+\bibliography{literatura}
+
+\end{document}
